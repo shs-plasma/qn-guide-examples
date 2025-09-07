@@ -8,16 +8,17 @@ export const registerPrompts = (server: any) => {
   server.prompt(
     "check-wallet",
     checkWalletSchema.shape,
-    ({ address, chain }: { address: string; chain: string }) => ({
+    ({ address, chain = "plasma" }: { address: string; chain?: string }) => ({
       description: "Guide for analyzing a wallet's balance and context",
       messages: [
         {
           role: "user",
           content: {
             type: "text",
-            text: `Please analyze this Ethereum wallet address: ${address} on ${chain} chain.
+            text: `Please analyze this wallet address: ${address} on ${chain} chain.
             
 You need to analyze a wallet address on an EVM blockchain.
+By default it is going to be on Plasma chain.
 
 First, use the eth_getBalance tool to check the wallet's balance.
 Next, use the eth_getCode tool to verify if it's a regular wallet or a contract.
@@ -40,7 +41,7 @@ Aim to be concise but informative in your analysis.`,
   server.prompt(
     "check-contract",
     checkContractSchema.shape,
-    ({ address, chain }: { address: string; chain: string }) => ({
+    ({ address, chain = "plasma" }: { address: string; chain?: string }) => ({
       description: "Prompt contract code introspection and analysis",
       messages: [
         {
@@ -50,6 +51,7 @@ Aim to be concise but informative in your analysis.`,
             text: `Please analyze this contract address: ${address} on ${chain} chain.
             
 You need to analyze a contract address on an EVM blockchain.
+By default it is going to be on Plasma chain.
 
 First, use the eth_getCode tool to verify if the address actually contains contract code.
 If it's a contract, note the bytecode size as an indicator of complexity.
@@ -69,7 +71,7 @@ Be analytical but accessible in your explanation.`,
   );
 
   // Register gas-analysis prompt
-  server.prompt("gas-analysis", gasAnalysisSchema.shape, ({ chain }: { chain: string }) => ({
+  server.prompt("gas-analysis", gasAnalysisSchema.shape, ({ chain = "plasma" }: { chain?: string }) => ({
     description: "Analyze gas price trends and evaluate timing",
     messages: [
       {
@@ -79,6 +81,7 @@ Be analytical but accessible in your explanation.`,
           text: `Please analyze the current gas prices on the ${chain} chain.
             
 You need to analyze the current gas price on an EVM blockchain.
+By default it is going to be on Plasma chain.
 
 Use the eth_gasPrice tool to retrieve the current gas price.
 
@@ -94,41 +97,122 @@ Keep your analysis concise, focusing on actionable insights.`,
     ],
   }));
 
+  // Register transaction-lookup prompt
+  server.prompt(
+    "transaction-lookup",
+    transactionLookupSchema.shape,
+    ({ hash, chain = "plasma" }: { hash: string; chain?: string }) => ({
+      description: "Look up and analyze a transaction by its hash",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please look up and analyze this transaction: ${hash} on ${chain} chain.
+            
+Use the eth_getTransactionByHash tool to retrieve the transaction details.
+By default it is going to be on Plasma chain.
+
+Provide a summary including:
+1. Transaction status (pending/confirmed)
+2. From and To addresses
+3. Value transferred
+4. Gas used and gas price
+5. Any other relevant details
+
+Make the analysis clear and easy to understand.`,
+          },
+        },
+      ],
+    })
+  );
+
+  // Register block-info prompt
+  server.prompt(
+    "block-info",
+    blockInfoSchema.shape,
+    ({ chain = "plasma" }: { chain?: string }) => ({
+      description: "Get current block information for a chain",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please get the current block information for the ${chain} chain.
+            
+Use the eth_blockNumber tool to retrieve the latest block number.
+By default it is going to be on Plasma chain.
+
+Provide:
+1. The current block number
+2. What this means for the chain's activity
+3. Approximate block time if known for this chain
+
+Keep the response brief and informative.`,
+          },
+        },
+      ],
+    })
+  );
+
   return server;
 };
 
-// Schema for check-wallet prompt
+// Schema for check-wallet prompt (with optional chain, defaults to plasma)
 const checkWalletSchema = z.object({
   address: z.string().refine(isAddress, {
     message: "Invalid Ethereum address format",
   }),
-  chain: z.string().refine(
+  chain: z.string().optional().default("plasma").refine(
     (val): val is ChainId => Object.keys(CHAINS).includes(val),
     {
-      message: "Unsupported chain. Use one of: ethereum, base, arbitrum, avalanche, bsc",
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
     }
   ),
 });
 
-// Schema for check-contract prompt
+// Schema for check-contract prompt (with optional chain, defaults to plasma)
 const checkContractSchema = z.object({
   address: z.string().refine(isAddress, {
     message: "Invalid Ethereum address format",
   }),
-  chain: z.string().refine(
+  chain: z.string().optional().default("plasma").refine(
     (val): val is ChainId => Object.keys(CHAINS).includes(val),
     {
-      message: "Unsupported chain. Use one of: ethereum, base, arbitrum, avalanche, bsc",
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
     }
   ),
 });
 
-// Schema for gas-analysis prompt
+// Schema for gas-analysis prompt (with optional chain, defaults to plasma)
 const gasAnalysisSchema = z.object({
-  chain: z.string().refine(
+  chain: z.string().optional().default("plasma").refine(
     (val): val is ChainId => Object.keys(CHAINS).includes(val),
     {
-      message: "Unsupported chain. Use one of: ethereum, base, arbitrum, avalanche, bsc",
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+    }
+  ),
+});
+
+// Schema for transaction-lookup prompt (new)
+const transactionLookupSchema = z.object({
+  hash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, {
+    message: "Invalid transaction hash format",
+  }),
+  chain: z.string().optional().default("plasma").refine(
+    (val): val is ChainId => Object.keys(CHAINS).includes(val),
+    {
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+    }
+  ),
+});
+
+// Schema for block-info prompt (new)
+const blockInfoSchema = z.object({
+  chain: z.string().optional().default("plasma").refine(
+    (val): val is ChainId => Object.keys(CHAINS).includes(val),
+    {
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
     }
   ),
 });
@@ -139,13 +223,14 @@ export const prompts = {
     schema: checkWalletSchema,
     prompt: `
 You need to analyze a wallet address on an EVM blockchain.
+By default it is going to be on Plasma chain.
 
 First, use the eth_getBalance tool to check the wallet's balance.
 Next, use the eth_getCode tool to verify if it's a regular wallet or a contract.
 
 Once you have this information, provide a summary of:
 1. The wallet's address
-2. The chain it's on
+2. The chain it's on (defaults to Plasma if not specified)
 3. Its balance in the native token
 4. Whether it's a regular wallet (EOA) or a contract
 5. Any relevant observations about the balance (e.g., if it's empty, has significant funds, etc.)
@@ -158,6 +243,7 @@ Aim to be concise but informative in your analysis.
     schema: checkContractSchema,
     prompt: `
 You need to analyze a contract address on an EVM blockchain.
+By default it is going to be on Plasma chain.
 
 First, use the eth_getCode tool to verify if the address actually contains contract code.
 If it's a contract, note the bytecode size as an indicator of complexity.
@@ -166,7 +252,7 @@ Then, use the eth_getBalance tool to check if the contract holds any native toke
 Provide a summary with:
 1. Confirmation if it's a contract or not
 2. The contract's size in bytes
-3. Any balance of native tokens it holds
+3. Any balance of native tokens it holds (in XPL for Plasma chain)
 4. What these findings might indicate (e.g., active contract with funds, abandoned contract, etc.)
 
 Be analytical but accessible in your explanation.
@@ -176,7 +262,8 @@ Be analytical but accessible in your explanation.
   'gas-analysis': {
     schema: gasAnalysisSchema,
     prompt: `
-You need to analyze the current gas price on an EVM blockchain.
+You need to analyze the current gas price on an EVM blockchain (defaults to Plasma).
+By default it is going to be on Plasma chain.
 
 Use the eth_gasPrice tool to retrieve the current gas price.
 
@@ -187,6 +274,42 @@ Provide a short analysis:
 4. Recommendations for users (wait for lower gas, proceed with transactions, etc.)
 
 Keep your analysis concise, focusing on actionable insights.
+    `,
+  },
+
+  'transaction-lookup': {
+    schema: transactionLookupSchema,
+    prompt: `
+You need to look up a transaction by its hash on an EVM blockchain (defaults to Plasma).
+By default it is going to be on Plasma chain.
+
+Use the eth_getTransactionByHash tool to retrieve the transaction details.
+
+Provide a summary including:
+1. Transaction status (pending/confirmed)
+2. From and To addresses
+3. Value transferred in the native token
+4. Gas used and gas price
+5. Any other relevant details
+
+Make the analysis clear and easy to understand.
+    `,
+  },
+
+  'block-info': {
+    schema: blockInfoSchema,
+    prompt: `
+You need to get the current block information for an EVM blockchain (defaults to Plasma).
+By default it is going to be on Plasma chain.
+
+Use the eth_blockNumber tool to retrieve the latest block number.
+
+Provide:
+1. The current block number
+2. What this means for the chain's activity
+3. Approximate block time if known for this chain
+
+Keep the response brief and informative.
     `,
   },
 };
