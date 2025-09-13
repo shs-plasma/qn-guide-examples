@@ -1,6 +1,6 @@
 # EVM MCP Server
 
-An MCP server built in TypeScript that enables LLM agents to perceive blockchain data across multiple EVM-compatible networks using QuickNode endpoints.
+An MCP server built in TypeScript that enables LLM agents to access EVM blockchain data on the Plasma mainnet using QuickNode endpoints.
 
 **Written tutorial of this project**: [Create an EVM MCP Server with Claude Desktop](https://www.quicknode.com/guides/ai/evm-mcp-server?utm_source=internal&utm_campaign=sample-apps&utm_content=evm-mcp-server)
 
@@ -16,7 +16,7 @@ An MCP server built in TypeScript that enables LLM agents to perceive blockchain
 ## Features
 
 - **MCP-Compatible**: Built using the Model Context Protocol SDK to directly talk to LLM agents
-- **Multi-Chain Support**: Works with Ethereum, Base, Arbitrum, Avalanche, and BSC
+- **Plasma-Only Support**: Defaults to and enforces the Plasma mainnet
 - **Core EVM Methods**: Includes `eth_getBalance`, `eth_getCode`, and `eth_gasPrice`
 - **LLM Prompts**: Pre-built prompts for wallet analysis, contract inspection, and gas price evaluation
 
@@ -30,8 +30,7 @@ An MCP server built in TypeScript that enables LLM agents to perceive blockchain
 ### QuickNode Endpoint and Token ID
 1. Sign up at [QuickNode](https://www.quicknode.com/signup?utm_source=internal&utm_campaign=sample-apps&utm_content=evm-mcp-server)
 2. Create a multichain endpoint. See the [How to Use the QuickNode Multichain Endpoint](https://www.quicknode.com/guides/quicknode-products/how-to-use-multichain-endpoint?utm_source=internal&utm_campaign=sample-apps&utm_content=evm-mcp-server) for more details.
-3. From the endpoint URL `https://your-endpoint.quiknode.pro/your-token-id/` (for Ethereum) or 
-   `https://your-endpoint.NETWORK.quiknode.pro/your-token-id/` (for other chains):
+3. From the endpoint URL `https://your-endpoint.plasma-mainnet.quiknode.pro/your-token-id/` (for Plasma):
    - Extract the endpoint name (replace `your-endpoint`)
    - Extract the token ID (replace `your-token-id-here`)
 4. Keep the endpoint name and token ID for later use.
@@ -89,7 +88,9 @@ To configure, open the **Claude Desktop** app, go to **Claude** > **Settings** >
             ],
             "env": {
                 "QN_ENDPOINT_NAME": "your-quicknode-endpoint-name",
-                "QN_TOKEN_ID": "your-quicknode-token-id"
+                "QN_TOKEN_ID": "your-quicknode-token-id",
+                "DEPLOYER_PRIVATE_KEY": "0xyour-32-byte-private-key", 
+                "SOURCIFY_URL": "https://sourcify.dev/server"
             }
         }
     }
@@ -99,28 +100,30 @@ To configure, open the **Claude Desktop** app, go to **Claude** > **Settings** >
 - Replace `your-quicknode-endpoint-name` with the name of your QuickNode endpoint.
 - Replace `your-quicknode-token-id` with the token ID of your QuickNode endpoint.
 - Replace `/absolute-path-to` with the absolute path to the `evm-mcp-server` directory.
+- `DEPLOYER_PRIVATE_KEY` is required only for contract deployment. Keep it secret; never commit to git.
+- `SOURCIFY_URL` is optional; defaults to `https://sourcify.dev/server`.
 
 ## Test the MCP Server
 
-Restart **Claude Desktop** and test the server by asking Claude Desktop to perform a task that requires the EVM MCP Server. For example, ask Claude Desktop to get balance of an address on any supported chain.
+Restart **Claude Desktop** and test the server by asking Claude Desktop to perform a task that requires the EVM MCP Server. Queries default to Plasma mainnet and other chains are rejected.
 
 ### Example Agent Interactions
 
-1. Check a wallet balance:
+1. Check a wallet balance (Plasma):
 ```
-Give the balance of the 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 address on Ethereum
-```
-
-2. Analyze a contract:
-
-```
-Analyze 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 on Ethereum
+Give the balance of 0x0000000000000000000000000000000000000000 on Plasma
 ```
 
-3. Get current gas prices:
+2. Analyze a contract (Plasma):
 
 ```
-Analyze the current gas prices on Ethereum, is it a good time to use the chain?
+Analyze 0x0000000000000000000000000000000000000000 on Plasma
+```
+
+3. Get current gas prices (Plasma):
+
+```
+Analyze the current gas prices on Plasma; is it a good time to use the chain?
 ```
 
 
@@ -129,25 +132,50 @@ Analyze the current gas prices on Ethereum, is it a good time to use the chain?
 1. **eth_getBalance**
    - **Description**: Get the ETH/native token balance of an address
    - **Parameters**:
-     - `address`: Ethereum address to check
-     - `chain`: Chain to query (ethereum, base, arbitrum, avalanche, bsc)
+     - `address`: EVM address to check
+     - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Returns**: 
      - Address, chain name, balance in wei, formatted balance with symbol
 
 2. **eth_getCode**
    - **Description**: Detect whether an address is a contract or wallet
    - **Parameters**:
-     - `address`: Ethereum address to check
-     - `chain`: Chain to query (ethereum, base, arbitrum, avalanche, bsc)
+     - `address`: EVM address to check
+     - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Returns**: 
      - Address information, contract status, bytecode size
 
 3. **eth_gasPrice**
    - **Description**: Get the current gas price on the specified chain
    - **Parameters**:
-     - `chain`: Chain to query (ethereum, base, arbitrum, avalanche, bsc)
+     - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Returns**: 
      - Chain name, gas price in wei and Gwei, timestamp
+
+4. **contract_verify**
+   - **Description**: Verify contract sources via Sourcify on Plasma.
+   - **Parameters**:
+     - `address`: EVM address to verify
+     - `chain`: Optional; defaults to `plasma`
+     - One of: `metadataJson` (stringified metadata) OR `sources` (array of `{ path, content }`)
+   - **Returns**: Sourcify verification response and status check
+
+5. **contract_deploy**
+   - **Description**: Deploy a contract using your QuickNode RPC and `DEPLOYER_PRIVATE_KEY`.
+   - **Parameters**:
+     - `chain`: Optional; defaults to `plasma`
+     - `bytecode`: 0x-prefixed bytecode
+     - `abi`: Contract ABI
+     - `args`: Constructor arguments (optional)
+     - `value`, `maxFeePerGas`, `maxPriorityFeePerGas`, `gas`, `nonce` (all optional)
+   - **Returns**: `txHash`, `contractAddress`, `status`, `gasUsed`
+
+6. **proxy_inspect**
+   - **Description**: Detect common proxies (EIP‑1967) by reading storage slots.
+   - **Parameters**:
+     - `address`: Contract address
+     - `chain`: Optional; defaults to `plasma`
+   - **Returns**: `{ isProxy, implementation, admin, beacon }`
 
 ### MCP Prompts
 
@@ -156,21 +184,21 @@ The server provides the following MCP prompts:
 1. **check-wallet**
    - **Description**: Guide for analyzing a wallet's balance and context
    - **Parameters**:
-     - `address`: Ethereum address to check
-     - `chain`: Chain to query (ethereum, base, arbitrum, avalanche, bsc)
+     - `address`: EVM address to check
+     - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Functionality**: Guides the LLM to get the balance and check if it's a contract, then provide analysis
 
 2. **check-contract**
    - **Description**: Prompt contract code introspection and analysis
    - **Parameters**:
-     - `address`: Ethereum address to check
-     - `chain`: Chain to query (ethereum, base, arbitrum, avalanche, bsc)
+     - `address`: EVM address to check
+     - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Functionality**: Guides the LLM to verify code presence, analyze contract size and balance
 
 3. **gas-analysis**
    - **Description**: Analyze gas price trends and evaluate timing
    - **Parameters**:
-     - `chain`: Chain to query (ethereum, base, arbitrum, avalanche, bsc)
+     - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Functionality**: Guides the LLM to analyze current gas prices and provide recommendations
 
 ### MCP Resources
@@ -179,3 +207,10 @@ The server provides access to these resources:
 - `evm://docs/gas-reference` - Gas price reference data for supported chains
 - `evm://docs/block-explorers` - Block explorer URLs by chain
 - `evm://docs/supported-chains` - Supported chains
+
+## Update Notes (Plasma-Only + Contract Tools)
+
+- Plasma-only enforcement: All tools default to `plasma` and reject other chains; `chainId=9745` configured.
+- New tools: `contract_verify` (Sourcify), `contract_deploy` (uses QuickNode + local key), `proxy_inspect` (EIP‑1967 storage slots).
+- Configuration: add `DEPLOYER_PRIVATE_KEY` for deployment, optional `SOURCIFY_URL` for verification backend.
+- Security: do not commit secrets; configure via Claude Desktop `env` or shell env vars for local runs.

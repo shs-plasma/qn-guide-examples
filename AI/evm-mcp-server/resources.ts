@@ -58,76 +58,24 @@ export const registerResources = (server: any) => {
 
 // Gas price reference points (in Gwei)
 const gasReferencePoints = {
-  ethereum: {
-    low: 20,
-    average: 40,
-    high: 100,
-    veryHigh: 200,
-  },
-  base: {
-    low: 0.05,
-    average: 0.1,
-    high: 0.3,
-    veryHigh: 0.5,
-  },
-  arbitrum: {
-    low: 0.1,
-    average: 0.25,
-    high: 0.5,
-    veryHigh: 1.0,
-  },
-  avalanche: {
+  plasma: {
     low: 1,
-    average: 5,
-    high: 20,
-    veryHigh: 50,
-  },
-  bsc: {
-    low: 3,
-    average: 5,
-    high: 10,
-    veryHigh: 20,
+    average: 2,
+    high: 5,
+    veryHigh: 10,
   },
 };
 
 // Block explorer URLs by chain
 const blockExplorers = {
-  ethereum: 'https://etherscan.io',
-  base: 'https://basescan.org',
-  arbitrum: 'https://arbiscan.io',
-  avalanche: 'https://snowtrace.io',
-  bsc: 'https://bscscan.com',
+  plasma: 'https://plasmascan.to',
 };
 
 const supportedChains = {
-  ethereum: {
-    network: "mainnet",
-    name: "Ethereum",
-    symbol: "ETH",
-    decimals: 18,
-  },
-  base: {
-    network: "base-mainnet",
-    name: "Base",
-    symbol: "ETH",
-    decimals: 18,
-  },
-  arbitrum: {
-    network: "arbitrum-mainnet",
-    name: "Arbitrum",
-    symbol: "ETH",
-    decimals: 18,
-  },
-  avalanche: {
-    network: "avalanche-mainnet",
-    name: "Avalanche",
-    symbol: "AVAX",
-    decimals: 18,
-  },
-  bsc: {
-    network: "bsc",
-    name: "Binance Smart Chain",
-    symbol: "BNB",
+  plasma: {
+    network: "plasma-mainnet",
+    name: "Plasma",
+    symbol: "XPL",
     decimals: 18,
   },
 };

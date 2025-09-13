@@ -19,7 +19,6 @@ export const registerPrompts = (server: any) => {
             
 You need to analyze a wallet address on an EVM blockchain.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 First, use the eth_getBalance tool to check the wallet's balance.
 Next, use the eth_getCode tool to verify if it's a regular wallet or a contract.
@@ -53,7 +52,6 @@ Aim to be concise but informative in your analysis.`,
             
 You need to analyze a contract address on an EVM blockchain.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 First, use the eth_getCode tool to verify if the address actually contains contract code.
 If it's a contract, note the bytecode size as an indicator of complexity.
@@ -84,7 +82,6 @@ Be analytical but accessible in your explanation.`,
             
 You need to analyze the current gas price on an EVM blockchain.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 Use the eth_gasPrice tool to retrieve the current gas price.
 
@@ -115,7 +112,6 @@ Keep your analysis concise, focusing on actionable insights.`,
             
 Use the eth_getTransactionByHash tool to retrieve the transaction details.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 Provide a summary including:
 1. Transaction status (pending/confirmed)
@@ -146,7 +142,6 @@ Make the analysis clear and easy to understand.`,
             
 Use the eth_blockNumber tool to retrieve the latest block number.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 Provide:
 1. The current block number
@@ -226,15 +221,9 @@ const blockInfoSchema = z.object({
 export const prompts = {
   'check-wallet': {
     schema: checkWalletSchema,
-    prompt: `## Network policy: Plasma mainnet only
-- Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
-- Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
-- If a user explicitly asks for a non‑Plasma chain, acknowledge the request and switch context; otherwise remain strictly on Plasma mainnet.
-- When a chain is unspecified in inputs or addresses, default to Plasma mainnet.
-- If an address/contract appears to be from a different network, ask for the Plasma mainnet equivalent or explicit permission to switch networks.\n\n
+    prompt: `
 You need to analyze a wallet address on an EVM blockchain.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 First, use the eth_getBalance tool to check the wallet's balance.
 Next, use the eth_getCode tool to verify if it's a regular wallet or a contract.
@@ -252,15 +241,9 @@ Aim to be concise but informative in your analysis.
   
   'check-contract': {
     schema: checkContractSchema,
-    prompt: `## Network policy: Plasma mainnet only
-- Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
-- Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
-- If a user explicitly asks for a non‑Plasma chain, acknowledge the request and switch context; otherwise remain strictly on Plasma mainnet.
-- When a chain is unspecified in inputs or addresses, default to Plasma mainnet.
-- If an address/contract appears to be from a different network, ask for the Plasma mainnet equivalent or explicit permission to switch networks.\n\n
+    prompt: `
 You need to analyze a contract address on an EVM blockchain.
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 First, use the eth_getCode tool to verify if the address actually contains contract code.
 If it's a contract, note the bytecode size as an indicator of complexity.
@@ -278,15 +261,9 @@ Be analytical but accessible in your explanation.
   
   'gas-analysis': {
     schema: gasAnalysisSchema,
-    prompt: `## Network policy: Plasma mainnet only
-- Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
-- Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
-- If a user explicitly asks for a non‑Plasma chain, acknowledge the request and switch context; otherwise remain strictly on Plasma mainnet.
-- When a chain is unspecified in inputs or addresses, default to Plasma mainnet.
-- If an address/contract appears to be from a different network, ask for the Plasma mainnet equivalent or explicit permission to switch networks.\n\n
+    prompt: `
 You need to analyze the current gas price on an EVM blockchain (defaults to Plasma).
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 Use the eth_gasPrice tool to retrieve the current gas price.
 
@@ -302,15 +279,9 @@ Keep your analysis concise, focusing on actionable insights.
 
   'transaction-lookup': {
     schema: transactionLookupSchema,
-    prompt: `## Network policy: Plasma mainnet only
-- Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
-- Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
-- If a user explicitly asks for a non‑Plasma chain, acknowledge the request and switch context; otherwise remain strictly on Plasma mainnet.
-- When a chain is unspecified in inputs or addresses, default to Plasma mainnet.
-- If an address/contract appears to be from a different network, ask for the Plasma mainnet equivalent or explicit permission to switch networks.\n\n
+    prompt: `
 You need to look up a transaction by its hash on an EVM blockchain (defaults to Plasma).
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 Use the eth_getTransactionByHash tool to retrieve the transaction details.
 
@@ -327,15 +298,9 @@ Make the analysis clear and easy to understand.
 
   'block-info': {
     schema: blockInfoSchema,
-    prompt: `## Network policy: Plasma mainnet only
-- Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
-- Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
-- If a user explicitly asks for a non‑Plasma chain, acknowledge the request and switch context; otherwise remain strictly on Plasma mainnet.
-- When a chain is unspecified in inputs or addresses, default to Plasma mainnet.
-- If an address/contract appears to be from a different network, ask for the Plasma mainnet equivalent or explicit permission to switch networks.\n\n
+    prompt: `
 You need to get the current block information for an EVM blockchain (defaults to Plasma).
 By default it is going to be on Plasma chain.
-Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
 
 Use the eth_blockNumber tool to retrieve the latest block number.
 
