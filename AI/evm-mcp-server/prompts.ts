@@ -19,10 +19,7 @@ export const registerPrompts = (server: any) => {
             
 You need to analyze a wallet address on an EVM blockchain.
 By default it is going to be on Plasma chain.
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 First, use the eth_getBalance tool to check the wallet's balance.
 Next, use the eth_getCode tool to verify if it's a regular wallet or a contract.
@@ -56,10 +53,7 @@ Aim to be concise but informative in your analysis.`,
             
 You need to analyze a contract address on an EVM blockchain.
 By default it is going to be on Plasma chain.
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 First, use the eth_getCode tool to verify if the address actually contains contract code.
 If it's a contract, note the bytecode size as an indicator of complexity.
@@ -90,10 +84,7 @@ Be analytical but accessible in your explanation.`,
             
 You need to analyze the current gas price on an EVM blockchain.
 By default it is going to be on Plasma chain.
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 Use the eth_gasPrice tool to retrieve the current gas price.
 
@@ -124,10 +115,7 @@ Keep your analysis concise, focusing on actionable insights.`,
             
 Use the eth_getTransactionByHash tool to retrieve the transaction details.
 By default it is going to be on Plasma chain.
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 Provide a summary including:
 1. Transaction status (pending/confirmed)
@@ -237,6 +225,152 @@ const blockInfoSchema = z.object({
   ),
 });
 
+// New: Cross-check wallet using RPC + Routescan
+const crossCheckWalletSchema = z.object({
+  address: z.string().refine(isAddress, { message: "Invalid Ethereum address format" }),
+  chain: z.string().optional().default("plasma").refine(
+    (val): val is ChainId => Object.keys(CHAINS).includes(val),
+    { message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}` }
+  ),
+});
+
+// New: Cross-check transaction using RPC + Routescan
+const crossCheckTxSchema = z.object({
+  hash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  chain: z.string().optional().default("plasma").refine(
+    (val): val is ChainId => Object.keys(CHAINS).includes(val),
+    { message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}` }
+  ),
+});
+
+// New: Routescan explore prompt
+const routescanExploreSchema = z.object({
+  chain: z.string().optional().default("plasma").refine(
+    (val): val is ChainId => Object.keys(CHAINS).includes(val),
+    { message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}` }
+  ),
+  module: z.string().optional(),
+  action: z.string().optional(),
+});
+
+// Register new prompts
+export const registerRoutescanPrompts = (server: any) => {
+  server.prompt(
+    "cross-check-wallet",
+    crossCheckWalletSchema.shape,
+    ({ address, chain = "plasma" }: { address: string; chain?: string }) => ({
+      description: "Compare balance via QuickNode RPC and Routescan",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Cross-check this wallet on ${chain}: ${address}.
+
+Steps:
+- Use eth_getBalance for on-chain RPC balance.
+- Use routescan_etherscan with module=account, action=balance for explorer balance.
+- If mismatched, explain possible reasons (indexing lag, pending state, tags).
+Provide a concise summary with both values and your conclusion.`,
+          },
+        },
+      ],
+    })
+  );
+
+  server.prompt(
+    "cross-check-transaction",
+    crossCheckTxSchema.shape,
+    ({ hash, chain = "plasma" }: { hash: string; chain?: string }) => ({
+      description: "Compare transaction details via RPC and Routescan",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Cross-check this transaction on ${chain}: ${hash}.
+
+Steps:
+- Use eth_getTransactionByHash to pull on-chain details (and receipt if available).
+- Use routescan_etherscan with module=proxy, action=eth_getTransactionByHash.
+- Compare status, gas, value, and logs if present. Call out differences and likely causes.
+Return a short, clear comparison table in text.`,
+          },
+        },
+      ],
+    })
+  );
+
+  server.prompt(
+    "routescan-explore",
+    routescanExploreSchema.shape,
+    ({ chain = "plasma", module, action }: { chain?: string; module?: string; action?: string }) => ({
+      description: "Use Routescan explorer APIs to browse data",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Explore Plasma data via Routescan on ${chain}.
+
+Suggestions:
+- To browse fresh addresses, call routescan_addresses with a limit.
+- For Etherscan-style queries, call routescan_etherscan with module/action${module ? ` (module=${module})` : ""}${action ? ` (action=${action})` : ""}.
+- For other endpoints, call routescan_get with an appropriate path and query params.
+Return a brief summary and include raw JSON snippets if helpful.`,
+          },
+        },
+      ],
+    })
+  );
+
+  server.prompt(
+    "routescan-logs",
+    z.object({
+      chain: z.string().optional().default("plasma"),
+      address: z.string().optional(),
+    }).shape,
+    ({ chain = "plasma", address }: { chain?: string; address?: string }) => ({
+      description: "Fetch logs from both RPC and Routescan",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Get recent logs${address ? ` for ${address}` : ""} on ${chain} using both:
+- eth_getLogs (RPC)
+- routescan_etherscan (module=logs, action=getLogs)
+Compare counts and sample a couple entries. Note any differences.`,
+          },
+        },
+      ],
+    })
+  );
+
+  server.prompt(
+    "routescan-contract",
+    z.object({ address: z.string(), chain: z.string().optional().default("plasma") }).shape,
+    ({ address, chain = "plasma" }: { address: string; chain?: string }) => ({
+      description: "Inspect contract via Routescan and verify status",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `For ${address} on ${chain}:
+- Use eth_getCode to determine if it's a contract.
+- Use routescan_etherscan (module=contract, action=getsourcecode) to check explorer metadata.
+- If sources absent but you have metadata/sources, consider contract_verify tool.
+Summarize findings and next steps.`,
+          },
+        },
+      ],
+    })
+  );
+
+  return server;
+};
+
 // Original prompts object kept for reference
 export const prompts = {
   'check-wallet': {
@@ -299,7 +433,6 @@ Be analytical but accessible in your explanation.
   
   'gas-analysis': {
     schema: gasAnalysisSchema,
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
     prompt: `## Network policy: Plasma mainnet only
 - Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
 - Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
@@ -309,11 +442,6 @@ Be analytical but accessible in your explanation.
 You need to analyze the current gas price on an EVM blockchain (defaults to Plasma).
 By default it is going to be on Plasma chain.
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
-    prompt: `
-You need to analyze the current gas price on an EVM blockchain (defaults to Plasma).
-By default it is going to be on Plasma chain.
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 Use the eth_gasPrice tool to retrieve the current gas price.
 
@@ -329,7 +457,6 @@ Keep your analysis concise, focusing on actionable insights.
 
   'transaction-lookup': {
     schema: transactionLookupSchema,
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
     prompt: `## Network policy: Plasma mainnet only
 - Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
 - Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
@@ -339,11 +466,6 @@ Keep your analysis concise, focusing on actionable insights.
 You need to look up a transaction by its hash on an EVM blockchain (defaults to Plasma).
 By default it is going to be on Plasma chain.
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
-    prompt: `
-You need to look up a transaction by its hash on an EVM blockchain (defaults to Plasma).
-By default it is going to be on Plasma chain.
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 Use the eth_getTransactionByHash tool to retrieve the transaction details.
 
@@ -360,7 +482,6 @@ Make the analysis clear and easy to understand.
 
   'block-info': {
     schema: blockInfoSchema,
-<<<<<<< HEAD:AI/evm-mcp-server/prompts.ts
     prompt: `## Network policy: Plasma mainnet only
 - Unless the user explicitly specifies a different network, you must assume and reference **only Plasma mainnet**.
 - Do **NOT** use, suggest, or reference other networks such as Polygon, BSC/BNB Chain, Base, Arbitrum, Optimism, Avalanche, Solana, etc.
@@ -370,11 +491,6 @@ Make the analysis clear and easy to understand.
 You need to get the current block information for an EVM blockchain (defaults to Plasma).
 By default it is going to be on Plasma chain.
 Do not use Polygon, BSC, Base, or any other network unless the user explicitly specifies it. If unspecified, always assume Plasma mainnet.
-=======
-    prompt: `
-You need to get the current block information for an EVM blockchain (defaults to Plasma).
-By default it is going to be on Plasma chain.
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/prompts.ts
 
 Use the eth_blockNumber tool to retrieve the latest block number.
 

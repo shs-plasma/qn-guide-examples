@@ -1,9 +1,30 @@
 import { z } from "zod";
-import { formatEther, isAddress, encodeFunctionData, decodeFunctionResult, encodeDeployData, type Hex } from "viem";
+import { formatEther, formatUnits, isAddress, encodeFunctionData, decodeFunctionResult, encodeDeployData, type Hex } from "viem";
 import { getPublicClient, getWalletClient } from "./clients";
-import { ChainId, getChain, CHAINS } from "./chains";
+import { ChainId, getChain, CHAINS, getRoutescanBase } from "./chains";
 
 const SOURCIFY_URL = process.env.SOURCIFY_URL || "https://sourcify.dev/server";
+const ROUTESCAN_API_KEY = process.env.ROUTESCAN_API_KEY || "";
+
+// Internal helper to query Routescan's Etherscan-compatible endpoint
+const routescanFetch = async (
+  chain: ChainId,
+  module: string,
+  action: string,
+  params?: Record<string, string | number | boolean>,
+  apiKey?: string
+) => {
+  const base = getRoutescanBase(chain);
+  const url = new URL(`${base}/etherscan`);
+  url.searchParams.set("module", module);
+  url.searchParams.set("action", action);
+  const key = apiKey ?? ROUTESCAN_API_KEY;
+  if (key) url.searchParams.set("apiKey", key);
+  for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
+  const res = await fetch(url.toString());
+  const json = await res.json().catch(() => ({}));
+  return { endpoint: url.toString(), result: json };
+};
 
 // Register tools with the MCP server
 export const registerTools = (server: any) => {
@@ -248,6 +269,127 @@ export const registerTools = (server: any) => {
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         return { content: [{ type: "text", text: `Error inspecting proxy: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  // Register routescan_addresses tool
+  server.tool(
+    "routescan_addresses",
+    routescanAddressesSchema.shape,
+    async (args: z.infer<typeof routescanAddressesSchema>) => {
+      try {
+        const result = await listRoutescanAddresses(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error listing addresses: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  // Register routescan_etherscan tool
+  server.tool(
+    "routescan_etherscan",
+    routescanEtherscanSchema.shape,
+    async (args: z.infer<typeof routescanEtherscanSchema>) => {
+      try {
+        const result = await routescanEtherscanQuery(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error querying Routescan Etherscan API: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  // Register routescan_get tool (generic)
+  server.tool(
+    "routescan_get",
+    routescanGetSchema.shape,
+    async (args: z.infer<typeof routescanGetSchema>) => {
+      try {
+        const result = await routescanGet(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error calling Routescan GET: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  // Typed Routescan account tools
+  server.tool(
+    "routescan_account_txlist",
+    routescanAccountTxListSchema.shape,
+    async (args: z.infer<typeof routescanAccountTxListSchema>) => {
+      try {
+        const result = await routescanAccountTxList(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error fetching account txlist: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "routescan_account_txlistinternal",
+    routescanAccountTxListInternalSchema.shape,
+    async (args: z.infer<typeof routescanAccountTxListInternalSchema>) => {
+      try {
+        const result = await routescanAccountTxListInternal(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error fetching internal txs: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "routescan_account_tokentx",
+    routescanAccountTokenTxSchema.shape,
+    async (args: z.infer<typeof routescanAccountTokenTxSchema>) => {
+      try {
+        const result = await routescanAccountTokenTx(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error fetching ERC20 transfers: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "routescan_account_tokennfttx",
+    routescanAccountTokenNftTxSchema.shape,
+    async (args: z.infer<typeof routescanAccountTokenNftTxSchema>) => {
+      try {
+        const result = await routescanAccountTokenNftTx(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error fetching NFT transfers: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "routescan_account_token1155tx",
+    routescanAccountToken1155TxSchema.shape,
+    async (args: z.infer<typeof routescanAccountToken1155TxSchema>) => {
+      try {
+        const result = await routescanAccountToken1155Tx(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error fetching ERC1155 transfers: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "routescan_account_tokenbalance",
+    routescanAccountTokenBalanceSchema.shape,
+    async (args: z.infer<typeof routescanAccountTokenBalanceSchema>) => {
+      try {
+        const result = await routescanAccountTokenBalance(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error fetching token balance: ${(error as Error).message}` }], isError: true };
       }
     }
   );
@@ -539,6 +681,439 @@ const transactionSchema = z.object({
   }),
 });
 
+// Schema: Routescan addresses list
+const routescanAddressesSchema = z.object({
+  chain: z
+    .string()
+    .optional()
+    .default("plasma")
+    .refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+    }),
+  limit: z.number().int().min(1).max(100).optional().default(25),
+  cursor: z.string().optional(),
+  // Optional API key override
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+// Schema: Routescan Etherscan-compatible query
+const routescanEtherscanSchema = z.object({
+  chain: z
+    .string()
+    .optional()
+    .default("plasma")
+    .refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+    }),
+  module: z.string(),
+  action: z.string(),
+  params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().default({}),
+  // Optional API key override
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const listRoutescanAddresses = async (params: z.infer<typeof routescanAddressesSchema>) => {
+  const { chain, limit, cursor, apiKey, format } = routescanAddressesSchema.parse(params);
+  const base = getRoutescanBase(chain as ChainId);
+  const key = apiKey ?? ROUTESCAN_API_KEY;
+  const url = new URL(`${base}/addresses`);
+  url.searchParams.set("limit", String(limit));
+  if (cursor) url.searchParams.set("cursor", cursor);
+  if (key) url.searchParams.set("apiKey", key);
+
+  const res = await fetch(url.toString());
+  const json = await res.json().catch(() => ({}));
+  if (format === "normalized") {
+    const items = Array.isArray((json as any)?.items)
+      ? (json as any).items.map((it: any) => ({
+          address: it?.address ?? it?.addr ?? null,
+          firstSeen: it?.firstSeen ?? null,
+          lastSeen: it?.lastSeen ?? null,
+        }))
+      : [];
+    return { chain, endpoint: url.toString(), format, count: items.length, items, raw: json };
+  }
+  return { chain, endpoint: url.toString(), limit, cursor: cursor || null, result: json, format };
+};
+
+export const routescanEtherscanQuery = async (params: z.infer<typeof routescanEtherscanSchema>) => {
+  const { chain, module, action, params: extra, apiKey, format } = routescanEtherscanSchema.parse(params);
+  const base = getRoutescanBase(chain as ChainId);
+  const key = apiKey ?? ROUTESCAN_API_KEY;
+  const url = new URL(`${base}/etherscan`);
+
+  // Build query string
+  url.searchParams.set("module", module);
+  url.searchParams.set("action", action);
+  if (key) url.searchParams.set("apiKey", key);
+  for (const [k, v] of Object.entries(extra || {})) {
+    url.searchParams.set(k, String(v));
+  }
+
+  const res = await fetch(url.toString());
+  const json = await res.json().catch(() => ({}));
+  if (format === "normalized") {
+    const address = typeof (extra as any)?.address === "string" ? ((extra as any).address as string) : undefined;
+    const decimals = typeof (extra as any)?.decimals === "number" ? ((extra as any).decimals as number) : undefined;
+    if (module === "account" && action === "txlist" && address) {
+      const items = Array.isArray((json as any)?.result) ? (json as any).result.map((tx: any) => ({
+        hash: tx.hash,
+        blockNumber: String(tx.blockNumber),
+        timestamp: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000).toISOString() : null,
+        from: tx.from,
+        to: tx.to,
+        valueWei: String(tx.value ?? "0"),
+        valueFormatted: (() => { try { return `${formatEther(BigInt(tx.value || 0))}`; } catch { return null; } })(),
+        gas: tx.gas ? String(tx.gas) : null,
+        gasPrice: tx.gasPrice ? String(tx.gasPrice) : null,
+        nonce: tx.nonce !== undefined ? Number(tx.nonce) : null,
+        status: tx.txreceipt_status === "1" ? "success" : (tx.txreceipt_status === "0" ? "failed" : null),
+        direction: tx.from?.toLowerCase() === address.toLowerCase() ? "out" : (tx.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+      })) : [];
+      return { chain, endpoint: url.toString(), module, action, params: extra, format, count: items.length, items, raw: json };
+    }
+    if (module === "account" && action === "txlistinternal" && address) {
+      const items = Array.isArray((json as any)?.result) ? (json as any).result.map((tx: any) => ({
+        hash: tx.hash,
+        blockNumber: String(tx.blockNumber),
+        timestamp: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000).toISOString() : null,
+        from: tx.from,
+        to: tx.to,
+        valueWei: String(tx.value ?? "0"),
+        valueFormatted: (() => { try { return `${formatEther(BigInt(tx.value || 0))}`; } catch { return null; } })(),
+        traceId: tx.traceId ?? null,
+        type: tx.type ?? null,
+        contractAddress: tx.contractAddress ?? null,
+        isError: tx.isError === "1",
+        direction: tx.from?.toLowerCase() === address.toLowerCase() ? "out" : (tx.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+      })) : [];
+      return { chain, endpoint: url.toString(), module, action, params: extra, format, count: items.length, items, raw: json };
+    }
+    if (module === "account" && action === "tokentx" && address) {
+      const items = Array.isArray((json as any)?.result) ? (json as any).result.map((ev: any) => {
+        const d = Number(ev.tokenDecimal || 0);
+        let formatted: string | null = null;
+        try { formatted = formatUnits(BigInt(ev.value || 0), d); } catch { formatted = null; }
+        return {
+          txHash: ev.hash,
+          blockNumber: String(ev.blockNumber),
+          timestamp: ev.timeStamp ? new Date(Number(ev.timeStamp) * 1000).toISOString() : null,
+          token: { address: ev.contractAddress, symbol: ev.tokenSymbol, name: ev.tokenName, decimals: d },
+          from: ev.from,
+          to: ev.to,
+          amount: { raw: String(ev.value ?? "0"), formatted },
+          direction: ev.from?.toLowerCase() === address.toLowerCase() ? "out" : (ev.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+        };
+      }) : [];
+      return { chain, endpoint: url.toString(), module, action, params: extra, format, count: items.length, items, raw: json };
+    }
+    if (module === "account" && action === "tokennfttx" && address) {
+      const items = Array.isArray((json as any)?.result) ? (json as any).result.map((ev: any) => ({
+        txHash: ev.hash,
+        blockNumber: String(ev.blockNumber),
+        timestamp: ev.timeStamp ? new Date(Number(ev.timeStamp) * 1000).toISOString() : null,
+        token: { address: ev.contractAddress, symbol: ev.tokenSymbol, name: ev.tokenName },
+        from: ev.from,
+        to: ev.to,
+        tokenId: ev.tokenID ?? ev.tokenId ?? null,
+        amount: { raw: "1", formatted: "1" },
+        direction: ev.from?.toLowerCase() === address.toLowerCase() ? "out" : (ev.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+      })) : [];
+      return { chain, endpoint: url.toString(), module, action, params: extra, format, count: items.length, items, raw: json };
+    }
+    if (module === "account" && action === "token1155tx" && address) {
+      const items = Array.isArray((json as any)?.result) ? (json as any).result.map((ev: any) => ({
+        txHash: ev.hash,
+        blockNumber: String(ev.blockNumber),
+        timestamp: ev.timeStamp ? new Date(Number(ev.timeStamp) * 1000).toISOString() : null,
+        token: { address: ev.contractAddress, symbol: ev.tokenSymbol, name: ev.tokenName },
+        from: ev.from,
+        to: ev.to,
+        tokenId: ev.tokenID ?? ev.tokenId ?? null,
+        amount: { raw: String(ev.tokenValue ?? ev.value ?? "0"), formatted: String(ev.tokenValue ?? ev.value ?? "0") },
+        direction: ev.from?.toLowerCase() === address.toLowerCase() ? "out" : (ev.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+      })) : [];
+      return { chain, endpoint: url.toString(), module, action, params: extra, format, count: items.length, items, raw: json };
+    }
+    if (module === "account" && action === "tokenbalance" && address) {
+      const raw = (json as any)?.result ?? null;
+      let formatted: string | null = null;
+      if (raw != null && typeof decimals === "number") {
+        try { formatted = formatUnits(BigInt(raw), decimals); } catch { formatted = null; }
+      }
+      return { chain, endpoint: url.toString(), module, action, params: extra, format, balance: { raw, formatted, decimals: decimals ?? null }, rawResult: json };
+    }
+  }
+  return {
+    chain,
+    endpoint: url.toString(),
+    module,
+    action,
+    params: extra,
+    result: json,
+    format,
+  };
+};
+
+// Schema: Routescan generic GET under base path
+const routescanGetSchema = z.object({
+  chain: z
+    .string()
+    .optional()
+    .default("plasma")
+    .refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+      message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+    }),
+  path: z.string().regex(/^\/?[a-zA-Z0-9_\-\/]*$/, {
+    message: "Path must be a relative path without query string",
+  }),
+  query: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().default({}),
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanGet = async (params: z.infer<typeof routescanGetSchema>) => {
+  const { chain, path, query, apiKey, format } = routescanGetSchema.parse(params);
+  const base = getRoutescanBase(chain as ChainId);
+  const url = new URL(`${base}/${path.replace(/^\//, "")}`);
+  for (const [k, v] of Object.entries(query || {})) url.searchParams.set(k, String(v));
+  const key = apiKey ?? ROUTESCAN_API_KEY;
+  if (key) url.searchParams.set("apiKey", key);
+  const res = await fetch(url.toString());
+  const json = await res.json().catch(() => ({}));
+  if (format === "normalized" && path.startsWith("etherscan")) {
+    return { chain, endpoint: url.toString(), format, note: "For normalization, prefer routescan_etherscan with module/action.", result: json };
+  }
+  return { chain, endpoint: url.toString(), result: json, format };
+};
+
+// ===================== Typed Routescan Account Tools =====================
+
+const commonRangeSchema = {
+  startblock: z.number().int().min(0).optional().default(0),
+  endblock: z.number().int().min(0).optional().default(99999999),
+  page: z.number().int().min(1).optional().default(1),
+  offset: z.number().int().min(1).max(10000).optional().default(25),
+  sort: z.enum(["asc", "desc"]).optional().default("desc"),
+};
+
+const routescanAccountTxListSchema = z.object({
+  chain: z.string().optional().default("plasma").refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+    message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+  }),
+  address: z.string().refine(isAddress, { message: "Invalid address" }),
+  ...commonRangeSchema,
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanAccountTxList = async (params: z.infer<typeof routescanAccountTxListSchema>) => {
+  const { chain, address, startblock, endblock, page, offset, sort, apiKey, format } = routescanAccountTxListSchema.parse(params);
+  const { endpoint, result } = await routescanFetch(chain as ChainId, "account", "txlist", {
+    address,
+    startblock,
+    endblock,
+    page,
+    offset,
+    sort,
+  }, apiKey);
+  if (format === "normalized") {
+    const items = Array.isArray(result?.result) ? result.result.map((tx: any) => ({
+      hash: tx.hash,
+      blockNumber: String(tx.blockNumber),
+      timestamp: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000).toISOString() : null,
+      from: tx.from,
+      to: tx.to,
+      valueWei: String(tx.value ?? "0"),
+      valueFormatted: (() => { try { return `${formatEther(BigInt(tx.value || 0))}`; } catch { return null; } })(),
+      gas: tx.gas ? String(tx.gas) : null,
+      gasPrice: tx.gasPrice ? String(tx.gasPrice) : null,
+      nonce: tx.nonce !== undefined ? Number(tx.nonce) : null,
+      status: tx.txreceipt_status === "1" ? "success" : (tx.txreceipt_status === "0" ? "failed" : null),
+      direction: tx.from?.toLowerCase() === address.toLowerCase() ? "out" : (tx.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+    })) : [];
+    return { chain, address, endpoint, format, count: items.length, items, raw: result };
+  }
+  return { chain, address, endpoint, result, format };
+};
+
+const routescanAccountTxListInternalSchema = z.object({
+  chain: z.string().optional().default("plasma").refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+    message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+  }),
+  address: z.string().refine(isAddress, { message: "Invalid address" }),
+  ...commonRangeSchema,
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanAccountTxListInternal = async (params: z.infer<typeof routescanAccountTxListInternalSchema>) => {
+  const { chain, address, startblock, endblock, page, offset, sort, apiKey, format } = routescanAccountTxListInternalSchema.parse(params);
+  const { endpoint, result } = await routescanFetch(chain as ChainId, "account", "txlistinternal", {
+    address,
+    startblock,
+    endblock,
+    page,
+    offset,
+    sort,
+  }, apiKey);
+  if (format === "normalized") {
+    const items = Array.isArray(result?.result) ? result.result.map((tx: any) => ({
+      hash: tx.hash,
+      blockNumber: String(tx.blockNumber),
+      timestamp: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000).toISOString() : null,
+      from: tx.from,
+      to: tx.to,
+      valueWei: String(tx.value ?? "0"),
+      valueFormatted: (() => { try { return `${formatEther(BigInt(tx.value || 0))}`; } catch { return null; } })(),
+      traceId: tx.traceId ?? null,
+      type: tx.type ?? null,
+      contractAddress: tx.contractAddress ?? null,
+      isError: tx.isError === "1",
+      direction: tx.from?.toLowerCase() === address.toLowerCase() ? "out" : (tx.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+    })) : [];
+    return { chain, address, endpoint, format, count: items.length, items, raw: result };
+  }
+  return { chain, address, endpoint, result, format };
+};
+
+const routescanAccountTokenTxSchema = z.object({
+  chain: z.string().optional().default("plasma").refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+    message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+  }),
+  address: z.string().refine(isAddress, { message: "Invalid address" }),
+  contractAddress: z.string().refine(isAddress, { message: "Invalid contract address" }).optional(),
+  ...commonRangeSchema,
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanAccountTokenTx = async (params: z.infer<typeof routescanAccountTokenTxSchema>) => {
+  const { chain, address, contractAddress, startblock, endblock, page, offset, sort, apiKey, format } = routescanAccountTokenTxSchema.parse(params);
+  const query: Record<string, string | number> = { address, startblock, endblock, page, offset, sort };
+  if (contractAddress) query.contractaddress = contractAddress;
+  const { endpoint, result } = await routescanFetch(chain as ChainId, "account", "tokentx", query, apiKey);
+  if (format === "normalized") {
+    const items = Array.isArray(result?.result) ? result.result.map((ev: any) => {
+      const decimals = Number(ev.tokenDecimal || 0);
+      let formatted: string | null = null;
+      try { formatted = formatUnits(BigInt(ev.value || 0), decimals); } catch { formatted = null; }
+      return {
+        txHash: ev.hash,
+        blockNumber: String(ev.blockNumber),
+        timestamp: ev.timeStamp ? new Date(Number(ev.timeStamp) * 1000).toISOString() : null,
+        token: { address: ev.contractAddress, symbol: ev.tokenSymbol, name: ev.tokenName, decimals },
+        from: ev.from,
+        to: ev.to,
+        amount: { raw: String(ev.value ?? "0"), formatted },
+        direction: ev.from?.toLowerCase() === address.toLowerCase() ? "out" : (ev.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+      };
+    }) : [];
+    return { chain, address, contractAddress: contractAddress || null, endpoint, format, count: items.length, items, raw: result };
+  }
+  return { chain, address, contractAddress: contractAddress || null, endpoint, result, format };
+};
+
+const routescanAccountTokenNftTxSchema = z.object({
+  chain: z.string().optional().default("plasma").refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+    message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+  }),
+  address: z.string().refine(isAddress, { message: "Invalid address" }),
+  contractAddress: z.string().refine(isAddress, { message: "Invalid contract address" }).optional(),
+  ...commonRangeSchema,
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanAccountTokenNftTx = async (params: z.infer<typeof routescanAccountTokenNftTxSchema>) => {
+  const { chain, address, contractAddress, startblock, endblock, page, offset, sort, apiKey, format } = routescanAccountTokenNftTxSchema.parse(params);
+  const query: Record<string, string | number> = { address, startblock, endblock, page, offset, sort };
+  if (contractAddress) query.contractaddress = contractAddress;
+  const { endpoint, result } = await routescanFetch(chain as ChainId, "account", "tokennfttx", query, apiKey);
+  if (format === "normalized") {
+    const items = Array.isArray(result?.result) ? result.result.map((ev: any) => ({
+      txHash: ev.hash,
+      blockNumber: String(ev.blockNumber),
+      timestamp: ev.timeStamp ? new Date(Number(ev.timeStamp) * 1000).toISOString() : null,
+      token: { address: ev.contractAddress, symbol: ev.tokenSymbol, name: ev.tokenName },
+      from: ev.from,
+      to: ev.to,
+      tokenId: ev.tokenID ?? ev.tokenId ?? null,
+      amount: { raw: "1", formatted: "1" },
+      direction: ev.from?.toLowerCase() === address.toLowerCase() ? "out" : (ev.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+    })) : [];
+    return { chain, address, contractAddress: contractAddress || null, endpoint, format, count: items.length, items, raw: result };
+  }
+  return { chain, address, contractAddress: contractAddress || null, endpoint, result, format };
+};
+
+const routescanAccountToken1155TxSchema = z.object({
+  chain: z.string().optional().default("plasma").refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+    message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+  }),
+  address: z.string().refine(isAddress, { message: "Invalid address" }),
+  contractAddress: z.string().refine(isAddress, { message: "Invalid contract address" }).optional(),
+  tokenId: z.union([z.string(), z.number()]).optional(),
+  ...commonRangeSchema,
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanAccountToken1155Tx = async (params: z.infer<typeof routescanAccountToken1155TxSchema>) => {
+  const { chain, address, contractAddress, tokenId, startblock, endblock, page, offset, sort, apiKey, format } = routescanAccountToken1155TxSchema.parse(params);
+  const query: Record<string, string | number> = { address, startblock, endblock, page, offset, sort };
+  if (contractAddress) query.contractaddress = contractAddress;
+  if (tokenId !== undefined) query.tokenid = tokenId as any;
+  const { endpoint, result } = await routescanFetch(chain as ChainId, "account", "token1155tx", query, apiKey);
+  if (format === "normalized") {
+    const items = Array.isArray(result?.result) ? result.result.map((ev: any) => ({
+      txHash: ev.hash,
+      blockNumber: String(ev.blockNumber),
+      timestamp: ev.timeStamp ? new Date(Number(ev.timeStamp) * 1000).toISOString() : null,
+      token: { address: ev.contractAddress, symbol: ev.tokenSymbol, name: ev.tokenName },
+      from: ev.from,
+      to: ev.to,
+      tokenId: ev.tokenID ?? ev.tokenId ?? null,
+      amount: { raw: String(ev.tokenValue ?? ev.value ?? "0"), formatted: String(ev.tokenValue ?? ev.value ?? "0") },
+      direction: ev.from?.toLowerCase() === address.toLowerCase() ? "out" : (ev.to?.toLowerCase() === address.toLowerCase() ? "in" : null),
+    })) : [];
+    return { chain, address, contractAddress: contractAddress || null, tokenId: tokenId ?? null, endpoint, format, count: items.length, items, raw: result };
+  }
+  return { chain, address, contractAddress: contractAddress || null, tokenId: tokenId ?? null, endpoint, result, format };
+};
+
+const routescanAccountTokenBalanceSchema = z.object({
+  chain: z.string().optional().default("plasma").refine((val): val is ChainId => Object.keys(CHAINS).includes(val), {
+    message: `Unsupported chain. Use one of: ${Object.keys(CHAINS).join(", ")}`,
+  }),
+  address: z.string().refine(isAddress, { message: "Invalid address" }),
+  contractAddress: z.string().refine(isAddress, { message: "Invalid contract address" }),
+  tag: z.string().optional().default("latest"),
+  decimals: z.number().int().min(0).max(36).optional(),
+  format: z.enum(["raw", "normalized"]).optional().default("raw"),
+  apiKey: z.string().optional(),
+});
+
+export const routescanAccountTokenBalance = async (params: z.infer<typeof routescanAccountTokenBalanceSchema>) => {
+  const { chain, address, contractAddress, tag, apiKey, decimals, format } = routescanAccountTokenBalanceSchema.parse(params);
+  const { endpoint, result } = await routescanFetch(chain as ChainId, "account", "tokenbalance", {
+    address,
+    contractaddress: contractAddress,
+    tag,
+  }, apiKey);
+  if (format === "normalized") {
+    const raw = result?.result ?? null;
+    let formatted: string | null = null;
+    if (raw != null && decimals != null) {
+      try { formatted = formatUnits(BigInt(raw), decimals); } catch { formatted = null; }
+    }
+    return { chain, address, contractAddress, endpoint, format, balance: { raw, formatted, decimals: decimals ?? null }, rawResult: result };
+  }
+  return { chain, address, contractAddress, endpoint, result, format };
+};
+
 /**
  * Get the balance of an Ethereum address on the specified chain
  */
@@ -555,6 +1130,12 @@ export const getBalance = async (params: z.infer<typeof balanceSchema>) => {
     // Format balance to ETH/native token
     const balanceFormatted = formatEther(balanceWei);
 
+    // Also query Routescan Etherscan-compatible API for cross-check
+    const routescan = await routescanFetch(chain as ChainId, "account", "balance", {
+      address,
+      tag: "latest",
+    }).catch((e) => ({ endpoint: null, result: { error: String(e) } } as any));
+
     return {
       address,
       chain: chainInfo.name,
@@ -562,6 +1143,8 @@ export const getBalance = async (params: z.infer<typeof balanceSchema>) => {
       balanceFormatted: `${balanceFormatted} ${chainInfo.symbol}`,
       symbol: chainInfo.symbol,
       decimals: chainInfo.decimals,
+      rpc: { endpoint: chainInfo.rpc },
+      routescan,
     };
   } catch (error) {
     return {
@@ -587,12 +1170,19 @@ export const getCode = async (params: z.infer<typeof codeSchema>) => {
     // Otherwise, it's a contract
     const isContract = code !== undefined && code !== "0x";
 
+    // Try Routescan getsourcecode (if supported)
+    const routescan = await routescanFetch(chain as ChainId, "contract", "getsourcecode", {
+      address,
+    }).catch((e) => ({ endpoint: null, result: { error: String(e) } } as any));
+
     return {
       address,
       chain: chainInfo.name,
       isContract,
       bytecodeSize: code ? (code.length - 2) / 2 : 0, // Convert hex string size to bytes
       bytecode: code || "0x",
+      rpc: { endpoint: chainInfo.rpc },
+      routescan,
     };
   } catch (error) {
     return {
@@ -617,11 +1207,18 @@ export const getGasPrice = async (params: z.infer<typeof gasPriceSchema>) => {
     // Convert to Gwei (1 Gwei = 10^9 wei)
     const gasPriceGwei = Number(gasPriceWei) / 1e9;
 
+    // Routescan gas oracle
+    const routescan = await routescanFetch(chain as ChainId, "gastracker", "gasoracle").catch(
+      (e) => ({ endpoint: null, result: { error: String(e) } } as any)
+    );
+
     return {
       chain: chainInfo.name,
       gasPriceWei: gasPriceWei.toString(),
       gasPriceGwei: gasPriceGwei.toFixed(2),
       timestamp: new Date().toISOString(),
+      rpc: { endpoint: chainInfo.rpc },
+      routescan,
     };
   } catch (error) {
     return {
@@ -666,6 +1263,23 @@ export const getLogs = async (params: z.infer<typeof logsSchema>) => {
       removed: log.removed,
     }));
 
+    // Try Routescan Etherscan-compatible getLogs as well
+    const rsParams: Record<string, any> = {};
+    if (address) rsParams.address = address;
+    if (fromBlock !== undefined) rsParams.fromBlock = fromBlock;
+    if (toBlock !== undefined) rsParams.toBlock = toBlock;
+    if (topics) {
+      // Etherscan expects topics as topic0, topic1, ... optionally with topic0_2_opr
+      topics.forEach((t, i) => {
+        if (typeof t === "string") rsParams[`topic${i}`] = t;
+        else if (Array.isArray(t)) rsParams[`topic${i}`] = t.join(",");
+      });
+    }
+    if (blockHash) rsParams.blockhash = blockHash;
+    const routescan = await routescanFetch(chain as ChainId, "logs", "getLogs", rsParams).catch(
+      (e) => ({ endpoint: null, result: { error: String(e) } } as any)
+    );
+
     return {
       chain: chainInfo.name,
       filter: {
@@ -677,6 +1291,8 @@ export const getLogs = async (params: z.infer<typeof logsSchema>) => {
       },
       logsCount: formattedLogs.length,
       logs: formattedLogs,
+      rpc: { endpoint: chainInfo.rpc },
+      routescan,
     };
   } catch (error) {
     return {
@@ -711,6 +1327,17 @@ export const callContract = async (params: z.infer<typeof callSchema>) => {
     // Make the call
     const result = await client.call(callParams);
 
+    // Routescan proxy eth_call
+    const rsParams: Record<string, any> = { to, data };
+    if (from) rsParams.from = from;
+    if (gas) rsParams.gas = gas;
+    if (gasPrice) rsParams.gasPrice = gasPrice;
+    if (value) rsParams.value = value;
+    if (blockNumber) rsParams.tag = blockNumber;
+    const routescan = await routescanFetch(chain as ChainId, "proxy", "eth_call", rsParams).catch(
+      (e) => ({ endpoint: null, result: { error: String(e) } } as any)
+    );
+
     return {
       chain: chainInfo.name,
       to,
@@ -723,6 +1350,8 @@ export const callContract = async (params: z.infer<typeof callSchema>) => {
         value: value?.toString(),
         blockNumber: blockNumber?.toString(),
       },
+      rpc: { endpoint: chainInfo.rpc },
+      routescan,
     };
   } catch (error) {
     return {
@@ -747,6 +1376,11 @@ export const getBlockNumber = async (params: z.infer<typeof blockNumberSchema>) 
     // Also get the block for additional information
     const block = await client.getBlock({ blockNumber });
 
+    // Routescan proxy eth_blockNumber
+    const routescan = await routescanFetch(chain as ChainId, "proxy", "eth_blockNumber").catch(
+      (e) => ({ endpoint: null, result: { error: String(e) } } as any)
+    );
+
     return {
       chain: chainInfo.name,
       blockNumber: blockNumber.toString(),
@@ -760,6 +1394,8 @@ export const getBlockNumber = async (params: z.infer<typeof blockNumberSchema>) 
       totalDifficulty: block.totalDifficulty?.toString(),
       size: block.size?.toString(),
       transactionCount: block.transactions.length,
+      rpc: { endpoint: chainInfo.rpc },
+      routescan,
     };
   } catch (error) {
     return {
@@ -834,7 +1470,12 @@ export const getTransactionByHash = async (params: z.infer<typeof transactionSch
       };
     }
 
-    return formattedTx;
+    // Routescan proxy eth_getTransactionByHash
+    const routescan = await routescanFetch(chain as ChainId, "proxy", "eth_getTransactionByHash", {
+      txhash: hash,
+    }).catch((e) => ({ endpoint: null, result: { error: String(e) } } as any));
+
+    return { ...formattedTx, rpc: { endpoint: chainInfo.rpc }, routescan };
   } catch (error) {
     return {
       error: `Failed to get transaction: ${(error as Error).message}`,
@@ -878,5 +1519,50 @@ export const tools = {
     handler: getTransactionByHash,
     schema: transactionSchema,
     description: "Analyze specific transactions by their hash",
+  },
+  routescan_addresses: {
+    handler: listRoutescanAddresses,
+    schema: routescanAddressesSchema,
+    description: "List recent addresses via Routescan explorer API",
+  },
+  routescan_etherscan: {
+    handler: routescanEtherscanQuery,
+    schema: routescanEtherscanSchema,
+    description: "Query Routescan's Etherscan-compatible endpoint (module/action)",
+  },
+  routescan_get: {
+    handler: routescanGet,
+    schema: routescanGetSchema,
+    description: "Generic GET under Routescan API base (arbitrary path+query)",
+  },
+  routescan_account_txlist: {
+    handler: routescanAccountTxList,
+    schema: routescanAccountTxListSchema,
+    description: "List normal transactions for an address (Etherscan account/txlist)",
+  },
+  routescan_account_txlistinternal: {
+    handler: routescanAccountTxListInternal,
+    schema: routescanAccountTxListInternalSchema,
+    description: "List internal transactions for an address (Etherscan account/txlistinternal)",
+  },
+  routescan_account_tokentx: {
+    handler: routescanAccountTokenTx,
+    schema: routescanAccountTokenTxSchema,
+    description: "List ERC20 token transfers for an address (Etherscan account/tokentx)",
+  },
+  routescan_account_tokennfttx: {
+    handler: routescanAccountTokenNftTx,
+    schema: routescanAccountTokenNftTxSchema,
+    description: "List ERC721 NFT transfers for an address (Etherscan account/tokennfttx)",
+  },
+  routescan_account_token1155tx: {
+    handler: routescanAccountToken1155Tx,
+    schema: routescanAccountToken1155TxSchema,
+    description: "List ERC1155 token transfers for an address (Etherscan account/token1155tx)",
+  },
+  routescan_account_tokenbalance: {
+    handler: routescanAccountTokenBalance,
+    schema: routescanAccountTokenBalanceSchema,
+    description: "Get ERC20 token balance for an address (Etherscan account/tokenbalance)",
   },
 };

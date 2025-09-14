@@ -6,6 +6,8 @@ export type ChainConfig = {
   symbol: string;
   decimals: number;
   chainId: number;
+  // Optional explorer API config
+  routescanNetwork?: string; // e.g., "mainnet"
 };
 
 export type ChainId = keyof typeof CHAINS;
@@ -27,30 +29,10 @@ const QN_TOKEN_ID = validateEnvVar("QN_TOKEN_ID");
 
 // Function to build QuickNode RPC URL based on network name
 const buildRpcUrl = (networkName: string): string => {
-<<<<<<< HEAD:AI/evm-mcp-server/chains.ts
-    return `https://${QN_ENDPOINT_NAME}.${networkName}.quiknode.pro/${QN_TOKEN_ID}/`;
-};
-
-export const CHAINS = {
-=======
-  // Special case for Ethereum mainnet
-  if (networkName === "mainnet") {
-    return `https://${QN_ENDPOINT_NAME}.quiknode.pro/${QN_TOKEN_ID}/`;
-  }
-
-  // For other networks, include network name in the URL
   return `https://${QN_ENDPOINT_NAME}.${networkName}.quiknode.pro/${QN_TOKEN_ID}/`;
 };
 
 export const CHAINS = {
-  ethereum: {
-    network: "mainnet",
-    rpc: buildRpcUrl("mainnet"),
-    name: "Ethereum",
-    symbol: "ETH",
-    decimals: 18,
-  },
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/chains.ts
   plasma: {
     network: "plasma-mainnet",
     rpc: buildRpcUrl("plasma-mainnet"),
@@ -58,6 +40,7 @@ export const CHAINS = {
     symbol: "XPL",
     decimals: 18,
     chainId: 9745,
+    routescanNetwork: "mainnet",
   },
 };
 
@@ -88,4 +71,11 @@ export const getViemChain = (chainId: ChainId): any => {
     nativeCurrency: { name: chain.name, symbol: chain.symbol, decimals: chain.decimals },
     rpcUrls: { default: { http: [chain.rpc] }, public: { http: [chain.rpc] } },
   };
+};
+
+// Helper to build Routescan base URL for a chain
+export const getRoutescanBase = (chainId: ChainId): string => {
+  const chain = getChain(chainId);
+  const network = chain.routescanNetwork || "mainnet";
+  return `https://api.routescan.io/v2/network/${network}/evm/${chain.chainId}`;
 };

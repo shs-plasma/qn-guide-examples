@@ -58,29 +58,21 @@ export const registerResources = (server: any) => {
 
 // Gas price reference points (in Gwei)
 const gasReferencePoints = {
-<<<<<<< HEAD:AI/evm-mcp-server/resources.ts
   plasma: {
     low: 1,
     average: 2,
     high: 5,
     veryHigh: 10,
-=======
-  ethereum: {
-    low: 20,
-    average: 40,
-    high: 100,
-    veryHigh: 200,
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/resources.ts
   },
 };
 
 // Block explorer URLs by chain
 const blockExplorers = {
-<<<<<<< HEAD:AI/evm-mcp-server/resources.ts
-=======
-  ethereum: 'https://etherscan.io',
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/resources.ts
-  plasma: 'https://plasmascan.to',
+  plasma: {
+    web: 'https://plasmascan.to',
+    routescanApiBase: 'https://api.routescan.io/v2/network/mainnet/evm/9745',
+    routescanDocs: 'https://routescan.io/documentation/etherscan-compatibility/accounts',
+  },
 };
 
 const supportedChains = {
@@ -90,14 +82,4 @@ const supportedChains = {
     symbol: "XPL",
     decimals: 18,
   },
-<<<<<<< HEAD:AI/evm-mcp-server/resources.ts
 };
-=======
-  plasma: {
-    network: "plasma-mainnet",
-    name: "Plasma",
-    symbol: "XPL",
-    decimals: 18,
-  },
-};
->>>>>>> 29c83d89254999e4a2c61b056967224003779df5:evm-mcp-server/resources.ts

@@ -18,6 +18,7 @@ An MCP server built in TypeScript that enables LLM agents to access EVM blockcha
 - **MCP-Compatible**: Built using the Model Context Protocol SDK to directly talk to LLM agents
 - **Plasma-Only Support**: Defaults to and enforces the Plasma mainnet
 - **Core EVM Methods**: Includes `eth_getBalance`, `eth_getCode`, and `eth_gasPrice`
+- **Dual-Source Results**: Core tools query both QuickNode RPC and Routescan (Etherscan-compatible) for cross-checks where applicable
 - **LLM Prompts**: Pre-built prompts for wallet analysis, contract inspection, and gas price evaluation
 
 ## Prerequisites
@@ -90,7 +91,8 @@ To configure, open the **Claude Desktop** app, go to **Claude** > **Settings** >
                 "QN_ENDPOINT_NAME": "your-quicknode-endpoint-name",
                 "QN_TOKEN_ID": "your-quicknode-token-id",
                 "DEPLOYER_PRIVATE_KEY": "0xyour-32-byte-private-key", 
-                "SOURCIFY_URL": "https://sourcify.dev/server"
+                "SOURCIFY_URL": "https://sourcify.dev/server",
+                "ROUTESCAN_API_KEY": "your-routescan-api-key"
             }
         }
     }
@@ -102,6 +104,7 @@ To configure, open the **Claude Desktop** app, go to **Claude** > **Settings** >
 - Replace `/absolute-path-to` with the absolute path to the `evm-mcp-server` directory.
 - `DEPLOYER_PRIVATE_KEY` is required only for contract deployment. Keep it secret; never commit to git.
 - `SOURCIFY_URL` is optional; defaults to `https://sourcify.dev/server`.
+- `ROUTESCAN_API_KEY` is optional; used for Routescan explorer API and Etherscan-compatible queries.
 
 ## Test the MCP Server
 
@@ -135,7 +138,7 @@ Analyze the current gas prices on Plasma; is it a good time to use the chain?
      - `address`: EVM address to check
      - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Returns**: 
-     - Address, chain name, balance in wei, formatted balance with symbol
+     - Address, chain, balance in wei and formatted, plus `rpc.endpoint` and a `routescan` object with the Etherscan-style response
 
 2. **eth_getCode**
    - **Description**: Detect whether an address is a contract or wallet
@@ -143,14 +146,14 @@ Analyze the current gas prices on Plasma; is it a good time to use the chain?
      - `address`: EVM address to check
      - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Returns**: 
-     - Address information, contract status, bytecode size
+     - Address info, contract status, bytecode size, and `routescan` contract metadata (getsourcecode) if available
 
 3. **eth_gasPrice**
    - **Description**: Get the current gas price on the specified chain
    - **Parameters**:
      - `chain`: Optional; defaults to `plasma` (other values are rejected)
    - **Returns**: 
-     - Chain name, gas price in wei and Gwei, timestamp
+     - Chain name, gas price in wei and Gwei, timestamp, plus Routescan gas oracle response
 
 4. **contract_verify**
    - **Description**: Verify contract sources via Sourcify on Plasma.
@@ -176,6 +179,25 @@ Analyze the current gas prices on Plasma; is it a good time to use the chain?
      - `address`: Contract address
      - `chain`: Optional; defaults to `plasma`
    - **Returns**: `{ isProxy, implementation, admin, beacon }`
+
+7. **routescan_addresses**
+   - **Description**: List recent addresses via Routescan explorer API for the configured chain.
+   - **Parameters**:
+     - `chain`: Optional; defaults to `plasma`
+     - `limit`: Optional; default `25`, max `100`
+     - `cursor`: Optional; pagination cursor from previous response
+     - `apiKey`: Optional; overrides `ROUTESCAN_API_KEY`
+   - **Returns**: Endpoint used and raw JSON response from Routescan
+
+8. **routescan_etherscan**
+   - **Description**: Call Routescan's Etherscan-compatible endpoint using `module` and `action`.
+   - **Parameters**:
+     - `chain`: Optional; defaults to `plasma`
+     - `module`: Etherscan module (e.g., `account`)
+     - `action`: Etherscan action (e.g., `txlist`)
+     - `params`: Optional record of additional query params (e.g., `address`, `startblock`)
+     - `apiKey`: Optional; overrides `ROUTESCAN_API_KEY`
+   - **Returns**: Endpoint used and raw JSON response from Routescan
 
 ### MCP Prompts
 
@@ -214,3 +236,99 @@ The server provides access to these resources:
 - New tools: `contract_verify` (Sourcify), `contract_deploy` (uses QuickNode + local key), `proxy_inspect` (EIP‑1967 storage slots).
 - Configuration: add `DEPLOYER_PRIVATE_KEY` for deployment, optional `SOURCIFY_URL` for verification backend.
 - Security: do not commit secrets; configure via Claude Desktop `env` or shell env vars for local runs.
+
+## Additional Routescan Tools and Prompts
+
+- Tools:
+  - `routescan_account_txlist` – Normal transactions list for an address.
+  - `routescan_account_txlistinternal` – Internal transactions list for an address.
+  - `routescan_account_tokentx` – ERC20 transfer history for an address (optional `contractAddress`).
+  - `routescan_account_tokennfttx` – ERC721 transfer history for an address (optional `contractAddress`).
+  - `routescan_account_token1155tx` – ERC1155 transfer history (optional `contractAddress`, `tokenId`).
+  - `routescan_account_tokenbalance` – ERC20 token balance for an address.
+
+- Prompts:
+  - `wallet-activity` – Summarize recent wallet activity using typed Routescan tools.
+  - `token-balance` – Check ERC20 balance via Routescan; suggest decimals/symbol lookup.
+  - `token-transfers` – Fetch ERC20/ERC721/ERC1155 transfers and summarize.
+
+### Normalization and Format Options
+
+- Many Routescan tools accept a `format` parameter with values:
+  - `raw` (default): returns the original Routescan JSON (`result`), plus the `endpoint` used.
+  - `normalized`: returns a consistent, user-friendly shape (`items`, `count`, and derived fields), along with `raw` for reference.
+
+- Supported normalization:
+  - `routescan_account_txlist` and `routescan_account_txlistinternal`
+    - items: `{ hash, blockNumber, timestamp, from, to, valueWei, valueFormatted, gas?, gasPrice?, nonce?, status?, direction }`
+  - `routescan_account_tokentx` (ERC20)
+    - items: `{ txHash, blockNumber, timestamp, token: { address, symbol, name, decimals }, from, to, amount: { raw, formatted }, direction }`
+  - `routescan_account_tokennfttx` (ERC721)
+    - items: `{ txHash, blockNumber, timestamp, token: { address, symbol, name }, from, to, tokenId, amount: { raw: "1", formatted: "1" }, direction }`
+  - `routescan_account_token1155tx` (ERC1155)
+    - items: `{ txHash, blockNumber, timestamp, token: { address, symbol, name }, from, to, tokenId, amount: { raw, formatted: raw }, direction }`
+  - `routescan_account_tokenbalance`
+    - normalized: `{ balance: { raw, formatted, decimals } }` (set `decimals` to compute `formatted`)
+  - `routescan_etherscan`
+    - If `format: "normalized"` and `module=account` with one of the above `action`s, the normalized shapes match the typed tools.
+  - `routescan_addresses`
+    - normalized: `{ items: [{ address, firstSeen?, lastSeen? }], count }` when available.
+  - `routescan_get`
+    - accepts `format` but normalization is only advisory; for Etherscan queries use `routescan_etherscan` to get normalized results.
+
+### Examples (Normalized)
+
+- Account tx list:
+  - Tool: `routescan_account_txlist`
+  - Params: `{ address: "0x...", sort: "desc", format: "normalized" }`
+
+- ERC20 transfers for a token:
+  - Tool: `routescan_account_tokentx`
+  - Params: `{ address: "0x...", contractAddress: "0xToken...", format: "normalized" }`
+
+- ERC20 balance with decimals:
+  - Tool: `routescan_account_tokenbalance`
+  - Params: `{ address: "0x...", contractAddress: "0xToken...", decimals: 18, format: "normalized" }`
+
+- Etherscan-compatible, normalized via generic tool:
+  - Tool: `routescan_etherscan`
+  - Params: `{ module: "account", action: "txlist", params: { address: "0x...", sort: "desc", startblock: 0, endblock: 99999999 }, format: "normalized" }`
+
+## Quick Usage Tips
+
+- Dual-source results: Core RPC tools include both `rpc.endpoint` and `routescan` in their responses. Use this to cross‑check values and investigate discrepancies (indexing lag, pending state).
+- API key: Set `ROUTESCAN_API_KEY` in your env for higher rate limits. You can override per call via the `apiKey` parameter on Routescan tools.
+- Pagination and ranges: Typed account tools accept `startblock`, `endblock`, `page`, `offset`, and `sort` (`asc`/`desc`). Start with `sort: "desc"` and adjust `page`/`offset`.
+- Normalized vs raw: Pass `format: "normalized"` for consistent shapes (`items`, `count`) and derived fields; otherwise you’ll get the raw Routescan JSON.
+- Token balances: For `routescan_account_tokenbalance` normalized output, include `decimals` (e.g., `18`) to compute a human‑readable `formatted` value.
+- Etherscan‑style via generic tool: `routescan_etherscan` supports `format: "normalized"` for `module=account` actions (tx lists and token transfers) to match typed tool shapes.
+9. **routescan_get**
+   - **Description**: Generic GET under Routescan API base. Use this to access new or less common endpoints.
+   - **Parameters**:
+     - `chain`: Optional; defaults to `plasma`
+     - `path`: Relative path under the base (e.g., `addresses`, `tokens/top`)
+     - `query`: Record of query params
+     - `apiKey`: Optional; overrides `ROUTESCAN_API_KEY`
+   - **Returns**: Endpoint used and raw JSON response
+4. **cross-check-wallet**
+   - **Description**: Compare balance from RPC and Routescan.
+   - **Parameters**: `address`, optional `chain`
+   - **Functionality**: Calls `eth_getBalance` and `routescan_etherscan` (account/balance) and summarizes differences.
+
+5. **cross-check-transaction**
+   - **Description**: Compare transaction details via RPC and Routescan.
+   - **Parameters**: `hash`, optional `chain`
+   - **Functionality**: Calls `eth_getTransactionByHash` and `routescan_etherscan` (proxy/eth_getTransactionByHash).
+
+6. **routescan-explore**
+   - **Description**: Explore data using Routescan APIs.
+   - **Parameters**: optional `module`, `action`, optional `chain`
+   - **Functionality**: Guides use of `routescan_addresses`, `routescan_etherscan`, and `routescan_get`.
+
+7. **routescan-logs**
+   - **Description**: Fetch logs from both RPC and Routescan and compare.
+   - **Parameters**: optional `address`, optional `chain`
+
+8. **routescan-contract**
+   - **Description**: Inspect contract via Routescan and verify status.
+   - **Parameters**: `address`, optional `chain`

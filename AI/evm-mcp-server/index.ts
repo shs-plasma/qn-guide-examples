@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools";
-import { registerPrompts } from "./prompts";
+import { registerPrompts, registerRoutescanPrompts } from "./prompts";
+import { registerRoutescanTypedPrompts } from "./prompts_routescan_typed";
 import { registerResources } from "./resources";
 
 async function main() {
@@ -16,6 +17,8 @@ async function main() {
     // Register all tools, prompts, and resources
     registerTools(server);
     registerPrompts(server);
+    registerRoutescanPrompts(server);
+    registerRoutescanTypedPrompts(server);
     registerResources(server);
 
     // Start the MCP server
@@ -33,5 +36,3 @@ main().catch((error) => {
   console.error("❌ Unhandled error:", error);
   process.exit(1);
 });
-
-
