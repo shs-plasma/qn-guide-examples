@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { formatEther, formatUnits, isAddress, encodeFunctionData, decodeFunctionResult, encodeDeployData, type Hex } from "viem";
+import { promises as fs } from "fs";
+import path from "path";
+import crypto from "crypto";
 import { getPublicClient, getWalletClient } from "./clients";
 import { ChainId, getChain, CHAINS, getRoutescanBase } from "./chains";
+import JSZip from "jszip";
 
 const SOURCIFY_URL = process.env.SOURCIFY_URL || "https://sourcify.dev/server";
 const ROUTESCAN_API_KEY = process.env.ROUTESCAN_API_KEY || "";
@@ -390,6 +394,72 @@ export const registerTools = (server: any) => {
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         return { content: [{ type: "text", text: `Error fetching token balance: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  // Knowledge Base tools
+  server.tool(
+    "kb_sync_source",
+    kbSyncSchema.shape,
+    async (args: z.infer<typeof kbSyncSchema>) => {
+      try {
+        const result = await kbSyncSource(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error syncing KB: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "kb_search",
+    kbSearchSchema.shape,
+    async (args: z.infer<typeof kbSearchSchema>) => {
+      try {
+        const result = await kbSearch(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error searching KB: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "kb_get",
+    kbGetSchema.shape,
+    async (args: z.infer<typeof kbGetSchema>) => {
+      try {
+        const result = await kbGet(args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error getting KB item: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "kb_status",
+    z.object({}).shape,
+    async () => {
+      try {
+        const result = await kbStatus();
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error getting KB status: ${(error as Error).message}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "kb_update_all",
+    z.object({}).shape,
+    async () => {
+      try {
+        const result = await kbUpdateAll();
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error updating KB: ${(error as Error).message}` }], isError: true };
       }
     }
   );
@@ -1483,6 +1553,314 @@ export const getTransactionByHash = async (params: z.infer<typeof transactionSch
   }
 };
 
+// =============== Knowledge Base (local directory index) ===============
+
+const KB_ROOT = path.resolve(process.cwd(), ".kb");
+
+const kbSyncSchema = z.object({
+  sourceId: z.string().optional(),
+  // Ingest from a local directory OR a ZIP
+  localDir: z.string().optional(),
+  zipUrl: z.string().url().optional(),
+  zipBase64: z.string().optional(),
+  zipPathPrefix: z.string().optional(),
+  includeExts: z.array(z.string()).optional().default([".md", ".sol", ".yul", ".ts", ".js", ".json", ".yml", ".yaml"]),
+  tags: z.array(z.string()).optional().default([]),
+  maxFiles: z.number().int().positive().optional(),
+});
+
+const kbSearchSchema = z.object({
+  q: z.string(),
+  topK: z.number().int().positive().max(50).optional().default(10),
+  sourceIds: z.array(z.string()).optional(),
+  pathPrefix: z.string().optional(),
+});
+
+const kbGetSchema = z.object({
+  chunkId: z.string().optional(),
+  sourceId: z.string().optional(),
+  path: z.string().optional(),
+  includeText: z.boolean().optional().default(true),
+});
+
+const ensureDir = async (dir: string) => {
+  await fs.mkdir(dir, { recursive: true }).catch(() => {});
+};
+
+const sha256 = (data: string | Buffer) => crypto.createHash("sha256").update(data).digest("hex");
+
+const walkDir = async (root: string): Promise<string[]> => {
+  const out: string[] = [];
+  const stack: string[] = [root];
+  while (stack.length) {
+    const dir = stack.pop()!;
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const ent of entries) {
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) stack.push(p);
+      else if (ent.isFile()) out.push(p);
+    }
+  }
+  return out;
+};
+
+const isTextFile = (ext: string) => [".md", ".sol", ".yul", ".ts", ".js", ".json", ".yml", ".yaml"].includes(ext.toLowerCase());
+
+const chunkMarkdown = (content: string) => {
+  const lines = content.split(/\r?\n/);
+  const chunks: { start: number; end: number; text: string; heading?: string }[] = [];
+  let start = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^#{1,3}\s+.+/.test(lines[i]) && i !== 0) {
+      const text = lines.slice(start, i).join("\n").trim();
+      if (text) chunks.push({ start, end: i - 1, text });
+      start = i;
+    }
+  }
+  const tail = lines.slice(start).join("\n").trim();
+  if (tail) chunks.push({ start, end: lines.length - 1, text: tail });
+  // Fallback if no headings
+  if (chunks.length === 0) {
+    const maxLines = 200;
+    for (let i = 0; i < lines.length; i += maxLines) {
+      const part = lines.slice(i, Math.min(i + maxLines, lines.length)).join("\n");
+      chunks.push({ start: i, end: Math.min(i + maxLines - 1, lines.length - 1), text: part });
+    }
+  }
+  return chunks;
+};
+
+const chunkCode = (content: string) => {
+  const lines = content.split(/\r?\n/);
+  const windowSize = 150;
+  const overlap = 30;
+  const chunks: { start: number; end: number; text: string }[] = [];
+  for (let i = 0; i < lines.length; i += windowSize - overlap) {
+    const start = i;
+    const end = Math.min(i + windowSize, lines.length) - 1;
+    const text = lines.slice(start, end + 1).join("\n");
+    chunks.push({ start, end, text });
+    if (end + 1 >= lines.length) break;
+  }
+  if (chunks.length === 0) chunks.push({ start: 0, end: lines.length - 1, text: content });
+  return chunks;
+};
+
+export const kbSyncSource = async (params: z.infer<typeof kbSyncSchema>) => {
+  const { sourceId, localDir, zipUrl, zipBase64, zipPathPrefix, includeExts, tags, maxFiles } = kbSyncSchema.parse(params);
+
+  const hasLocal = Boolean(localDir);
+  const hasZip = Boolean(zipUrl || zipBase64);
+  if (!hasLocal && !hasZip) return { error: "Provide localDir or zipUrl/zipBase64" };
+  if (hasLocal && hasZip) return { error: "Provide only one of localDir or zipUrl/zipBase64" };
+
+  let id = sourceId || "kb-source";
+  const srcRootBase = path.join(KB_ROOT, "sources");
+  await ensureDir(srcRootBase);
+
+  const chunksOut: any[] = [];
+  let fileCount = 0;
+  let manifest: any;
+
+  if (hasLocal) {
+    const absDir = path.resolve(localDir!);
+    const stat = await fs.stat(absDir).catch(() => null);
+    if (!stat || !stat.isDirectory()) return { error: `Directory not found: ${absDir}` };
+    if (!sourceId) id = path.basename(absDir).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const srcRoot = path.join(srcRootBase, id);
+    await fs.rm(srcRoot, { recursive: true, force: true }).catch(() => {});
+    await ensureDir(srcRoot);
+
+    const files = (await walkDir(absDir)).filter((p) => includeExts.includes(path.extname(p).toLowerCase()) && isTextFile(path.extname(p)));
+    const limited = typeof maxFiles === "number" ? files.slice(0, maxFiles) : files;
+
+    for (const filePath of limited) {
+      try {
+        const rel = path.relative(absDir, filePath);
+        const ext = path.extname(filePath).toLowerCase();
+        const text = await fs.readFile(filePath, "utf8");
+        const parts = ext === ".md" ? chunkMarkdown(text) : chunkCode(text);
+        for (const part of parts) {
+          const cid = sha256(`${id}:${rel}:${part.start}-${part.end}:${sha256(part.text)}`).slice(0, 32);
+          chunksOut.push({ id: cid, sourceId: id, path: rel, startLine: part.start + 1, endLine: part.end + 1, ext, text: part.text });
+        }
+        fileCount++;
+      } catch {}
+    }
+
+    manifest = { id, type: "local_dir", rootPath: absDir, tags, updatedAt: new Date().toISOString(), fileCount, chunkCount: chunksOut.length };
+    await fs.writeFile(path.join(srcRoot, "manifest.json"), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(path.join(srcRoot, "chunks.jsonl"), chunksOut.map((c) => JSON.stringify(c)).join("\n"));
+  } else {
+    const token = process.env.GITHUB_TOKEN;
+    const fetchWithAuth = async (u: string) => {
+      const headers: Record<string, string> = {};
+      try {
+        const host = new URL(u).hostname;
+        if (token && (host.endsWith("github.com") || host.endsWith("githubusercontent.com"))) headers["authorization"] = `Bearer ${token}`;
+      } catch {}
+      const res = await fetch(u, { headers });
+      if (!res.ok) throw new Error(`Failed to fetch ZIP: ${res.status} ${res.statusText}`);
+      const ab = await res.arrayBuffer();
+      return Buffer.from(ab);
+    };
+    const buf = zipBase64 ? Buffer.from(zipBase64, "base64") : await fetchWithAuth(zipUrl!);
+    if (!sourceId) id = (zipUrl ? path.basename(zipUrl).replace(/\W+/g, "-") : "zip") + "-" + sha256(buf).slice(0, 8);
+    const srcRoot = path.join(srcRootBase, id);
+    await fs.rm(srcRoot, { recursive: true, force: true }).catch(() => {});
+    await ensureDir(srcRoot);
+
+    const zip = await JSZip.loadAsync(buf);
+    const names = Object.keys(zip.files);
+    const limitedNames = typeof maxFiles === "number" ? names.slice(0, maxFiles) : names;
+    for (const name of limitedNames) {
+      const entry = zip.files[name];
+      if (!entry || entry.dir) continue;
+      let rel = name;
+      if (zipPathPrefix && rel.startsWith(zipPathPrefix)) rel = rel.slice(zipPathPrefix.length).replace(/^\/+/, "");
+      const ext = path.extname(rel).toLowerCase();
+      if (!includeExts.includes(ext) || !isTextFile(ext)) continue;
+      let text: string;
+      try { text = await entry.async("string"); } catch { continue; }
+      const parts = ext === ".md" ? chunkMarkdown(text) : chunkCode(text);
+      for (const part of parts) {
+        const cid = sha256(`${id}:${rel}:${part.start}-${part.end}:${sha256(part.text)}`).slice(0, 32);
+        chunksOut.push({ id: cid, sourceId: id, path: rel, startLine: part.start + 1, endLine: part.end + 1, ext, text: part.text });
+      }
+      fileCount++;
+    }
+
+    manifest = { id, type: "zip", zipUrl: zipUrl || null, zipHash: sha256(buf), zipPathPrefix: zipPathPrefix || null, tags, updatedAt: new Date().toISOString(), fileCount, chunkCount: chunksOut.length };
+    await fs.writeFile(path.join(srcRoot, "manifest.json"), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(path.join(srcRoot, "chunks.jsonl"), chunksOut.map((c) => JSON.stringify(c)).join("\n"));
+  }
+
+  // Update registry
+  await ensureDir(KB_ROOT);
+  const regPath = path.join(KB_ROOT, "registry.json");
+  let registry: any[] = [];
+  try { registry = JSON.parse(await fs.readFile(regPath, "utf8")); } catch {}
+  const others = registry.filter((r: any) => r.id !== id);
+  others.push(manifest);
+  await fs.writeFile(regPath, JSON.stringify(others, null, 2));
+
+  return { ok: true, source: manifest };
+};
+
+export const kbSearch = async (params: z.infer<typeof kbSearchSchema>) => {
+  const { q, topK, sourceIds, pathPrefix } = kbSearchSchema.parse(params);
+  await ensureDir(KB_ROOT);
+  const regPath = path.join(KB_ROOT, "registry.json");
+  let registry: any[] = [];
+  try { registry = JSON.parse(await fs.readFile(regPath, "utf8")); } catch {}
+  const targets = sourceIds && sourceIds.length ? registry.filter((r) => sourceIds.includes(r.id)) : registry;
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits: any[] = [];
+  for (const src of targets) {
+    const chunkPath = path.join(KB_ROOT, "sources", src.id, "chunks.jsonl");
+    const text = await fs.readFile(chunkPath, "utf8").catch(() => "");
+    if (!text) continue;
+    for (const line of text.split(/\n/)) {
+      if (!line.trim()) continue;
+      let rec: any;
+      try { rec = JSON.parse(line); } catch { continue; }
+      if (pathPrefix && !String(rec.path).startsWith(pathPrefix)) continue;
+      const lower = String(rec.text || "").toLowerCase();
+      let score = 0;
+      for (const t of terms) {
+        if (!t) continue;
+        const matches = lower.split(t).length - 1;
+        score += matches;
+      }
+      if (score > 0) hits.push({ score, chunkId: rec.id, sourceId: rec.sourceId, path: rec.path, startLine: rec.startLine, endLine: rec.endLine, snippet: rec.text.slice(0, 400) });
+    }
+  }
+  hits.sort((a, b) => b.score - a.score);
+  return { query: q, total: hits.length, results: hits.slice(0, topK) };
+};
+
+export const kbGet = async (params: z.infer<typeof kbGetSchema>) => {
+  const { chunkId, sourceId, path: relPath, includeText } = kbGetSchema.parse(params);
+  await ensureDir(KB_ROOT);
+  const regPath = path.join(KB_ROOT, "registry.json");
+  let registry: any[] = [];
+  try { registry = JSON.parse(await fs.readFile(regPath, "utf8")); } catch {}
+
+  const findChunk = async (srcId: string): Promise<any | null> => {
+    const chunkPath = path.join(KB_ROOT, "sources", srcId, "chunks.jsonl");
+    const text = await fs.readFile(chunkPath, "utf8").catch(() => "");
+    if (!text) return null;
+    for (const line of text.split(/\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const rec = JSON.parse(line);
+        if (rec.id === chunkId) return rec;
+      } catch {}
+    }
+    return null;
+  };
+
+  if (chunkId) {
+    for (const src of registry) {
+      const rec = await findChunk(src.id);
+      if (rec) return rec;
+    }
+    return { error: `chunkId not found: ${chunkId}` };
+  }
+
+  if (sourceId && relPath) {
+    const src = registry.find((r) => r.id === sourceId);
+    if (!src) return { error: `source not found: ${sourceId}` };
+    const absFile = path.join(src.rootPath, relPath);
+    const stat = await fs.stat(absFile).catch(() => null);
+    if (!stat || !stat.isFile()) return { error: `file not found: ${absFile}` };
+    const text = includeText ? await fs.readFile(absFile, "utf8") : undefined;
+    return { sourceId, path: relPath, size: stat.size, text };
+  }
+
+  return { error: "Provide chunkId or sourceId+path" };
+};
+
+export const kbStatus = async () => {
+  await ensureDir(KB_ROOT);
+  const regPath = path.join(KB_ROOT, "registry.json");
+  let registry: any[] = [];
+  try { registry = JSON.parse(await fs.readFile(regPath, "utf8")); } catch {}
+  let sources: any[] = [];
+  for (const src of registry) {
+    const chunkPath = path.join(KB_ROOT, "sources", src.id, "chunks.jsonl");
+    const chunkText = await fs.readFile(chunkPath, "utf8").catch(() => "");
+    const chunks = chunkText ? chunkText.split(/\n/).filter(Boolean).length : 0;
+    sources.push({ id: src.id, tags: src.tags, updatedAt: src.updatedAt, fileCount: src.fileCount, chunkCount: chunks });
+  }
+  return { root: KB_ROOT, sources };
+};
+
+// Reindex all registered KB sources
+export const kbUpdateAll = async () => {
+  await ensureDir(KB_ROOT);
+  const regPath = path.join(KB_ROOT, "registry.json");
+  let registry: any[] = [];
+  try { registry = JSON.parse(await fs.readFile(regPath, "utf8")); } catch {}
+  const results: any[] = [];
+  for (const src of registry) {
+    try {
+      if (src.type === "local_dir" && src.rootPath) {
+        await kbSyncSource({ sourceId: src.id, localDir: src.rootPath, includeExts: [".md", ".sol", ".yul", ".ts", ".js", ".json", ".yml", ".yaml"], tags: src.tags || [] } as any);
+        results.push({ id: src.id, type: src.type, ok: true });
+      } else if (src.type === "zip" && src.zipUrl) {
+        await kbSyncSource({ sourceId: src.id, zipUrl: src.zipUrl, zipPathPrefix: src.zipPathPrefix || undefined, includeExts: [".md", ".sol", ".yul", ".ts", ".js", ".json", ".yml", ".yaml"], tags: src.tags || [] } as any);
+        results.push({ id: src.id, type: src.type, ok: true });
+      } else {
+        results.push({ id: src.id, type: src.type, ok: false, error: "Unsupported source type or missing fields" });
+      }
+    } catch (e) {
+      results.push({ id: src.id, type: src.type, ok: false, error: (e as Error).message });
+    }
+  }
+  return { count: results.length, results };
+};
+
 // Export all tools with their schemas
 export const tools = {
   eth_getBalance: {
@@ -1519,6 +1897,31 @@ export const tools = {
     handler: getTransactionByHash,
     schema: transactionSchema,
     description: "Analyze specific transactions by their hash",
+  },
+  kb_sync_source: {
+    handler: kbSyncSource,
+    schema: kbSyncSchema,
+    description: "Index a local directory into the Knowledge Base (Markdown + code)",
+  },
+  kb_search: {
+    handler: kbSearch,
+    schema: kbSearchSchema,
+    description: "Search the Knowledge Base for relevant chunks",
+  },
+  kb_get: {
+    handler: kbGet,
+    schema: kbGetSchema,
+    description: "Fetch a specific KB chunk or file",
+  },
+  kb_status: {
+    handler: kbStatus,
+    schema: z.object({}),
+    description: "Show Knowledge Base sources and stats",
+  },
+  kb_update_all: {
+    handler: kbUpdateAll,
+    schema: z.object({}),
+    description: "Reindex all registered Knowledge Base sources",
   },
   routescan_addresses: {
     handler: listRoutescanAddresses,

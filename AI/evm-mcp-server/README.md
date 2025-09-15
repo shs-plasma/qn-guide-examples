@@ -237,6 +237,39 @@ The server provides access to these resources:
 - Configuration: add `DEPLOYER_PRIVATE_KEY` for deployment, optional `SOURCIFY_URL` for verification backend.
 - Security: do not commit secrets; configure via Claude Desktop `env` or shell env vars for local runs.
 
+## Knowledge Base (Local + ZIP)
+
+Index local directories or ZIP archives into a lightweight Knowledge Base under `.kb/`. This avoids repeated downloads and enables fast, offline queries.
+
+- Tools
+  - `kb_sync_source`
+    - Index a local folder or a ZIP archive.
+    - Parameters:
+      - `localDir` OR `zipUrl` OR `zipBase64`
+      - `zipPathPrefix` (optional): strip top-level folder from ZIP paths (e.g., `plasma-docs-main/`)
+      - `includeExts` (optional): defaults to `[".md", ".sol", ".yul", ".ts", ".js", ".json", ".yml", ".yaml"]`
+      - `sourceId` (optional): stable ID
+      - `tags` (optional): array of strings
+    - Examples:
+      - Local: `{ "tool": "kb_sync_source", "params": { "localDir": "/Users/.../plasma-docs-main", "sourceId": "plasma-docs" } }`
+      - ZIP URL: `{ "tool": "kb_sync_source", "params": { "zipUrl": "https://example.com/plasma-docs.zip", "zipPathPrefix": "plasma-docs-main/", "sourceId": "plasma-docs" } }`
+  - `kb_search`: `{ q, topK?, sourceIds?, pathPrefix? }`
+  - `kb_get`: by `chunkId` or `sourceId` + `path`; `includeText?`
+  - `kb_status`: lists sources and counts
+  - `kb_update_all`: reindex all registered sources
+
+- Private GitHub ZIPs
+  - Set `GITHUB_TOKEN` in env to authorize downloads from GitHub/private repos. Auth is added automatically for GitHub hosts.
+
+- Storage layout
+  - `.kb/registry.json` — list of sources
+  - `.kb/sources/<sourceId>/manifest.json` — source details
+  - `.kb/sources/<sourceId>/chunks.jsonl` — newline-delimited chunks with metadata
+
+- Tips
+  - For GitHub archives, pass `zipPathPrefix` to strip the auto-added folder.
+  - Run `kb_update_all` periodically to refresh all sources.
+
 ## Additional Routescan Tools and Prompts
 
 - Tools:
